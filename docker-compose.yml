@@ -84,7 +84,7 @@ services:
   # and their port allocations directly on the host network.
   # It won't be healthy until you paste the token from the Panel UI (step 6 below).
   wings:
-    image: ghcr.io/pterodactyl/wings:latest
+    image: ghcr.io/pterodactyl/wings:v1.11.11
     restart: unless-stopped
     network_mode: host
     privileged: true
