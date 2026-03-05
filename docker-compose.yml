@@ -14,10 +14,12 @@ services:
       MYSQL_USER: pterodactyl
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      # Must pass root credentials or healthcheck silently fails on auth
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s   # Give MySQL time to fully initialize before retries count
 
   # ── Pterodactyl Redis (panel internal — never exposed) ─────────────────
   ptero-redis:
@@ -28,38 +30,97 @@ services:
     volumes:
       - ptero-redis-data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
-  # ── Minecraft Redis (game servers connect to this via server IP) ────────
+  # ── Minecraft Redis (game servers connect via server IP) ───────────────
   minecraft-redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6382:6379"
     volumes:
       - minecraft-redis-data:/data
 
   # ── Pterodactyl Panel ──────────────────────────────────────────────────
   panel:
-    image: ghcr.io/pterodactyl/panel:latest
+    image: ghcr.io/pterodactyl/panel:v1.11.11
     restart: unless-stopped
     networks:
       - ptero-internal
     ports:
-      - "80:80"
+      - "8082:80"
     volumes:
       - panel-var:/app/var
       - panel-nginx:/etc/nginx/http.d
       - panel-logs:/app/storage/logs
     environment:
-      APP_URL: "http://${SERVER_IP}"
+      # !! Port MUST be included — omitting it breaks CSRF tokens and session cookies
+      APP_URL: "http://${SERVER_IP}:8082"
       APP_ENV: production
       APP_KEY: ${APP_KEY}
       APP_DEBUG: "false"
-      APP_TIMEZONE: ${TIMEZONE}
+      APP_TIMEZONE: ${TIMEZONE:-UTC}
+
+      # Database
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: panel
+      DB_USERNAME: pterodactyl
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+
+      # Redis
+      REDIS_HOST: ptero-redis
+      REDIS_PORT: 6379
+
+      # Drivers — these keys changed in Laravel 9+, old keys are silently ignored!
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis      # ← was QUEUE_DRIVER (broken on Laravel 9+)
+
+      # Mail — MAIL_DRIVER is deprecated, use MAIL_MAILER
+      MAIL_MAILER: log             # ← was MAIL_DRIVER (broken on newer panel versions)
+      MAIL_FROM_ADDRESS: "noreply@example.com"
+      MAIL_FROM_NAME: "Pterodactyl"
+
+      # Critical for HTTP (non-HTTPS) setups — without this login will redirect-loop
+      SESSION_SECURE_COOKIE: "false"
+      TRUSTED_PROXIES: "*"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ptero-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/auth/login || exit 1"]
+      start_period: 30s
+      interval: 5s
+      timeout: 5s
+      retries: 6
+  # ── One-shot: Create admin user on first run ───────────────────────────
+  # This runs once, creates your admin account, then exits.
+  # It will error harmlessly on subsequent runs (duplicate email) — that's fine.
+  panel-setup:
+    image: ghcr.io/pterodactyl/panel:v1.11.11
+    restart: "no"
+    networks:
+      - ptero-internal
+    volumes:
+      - panel-var:/app/var
+      - panel-logs:/app/storage/logs
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        echo 'Waiting for panel to finish migrating...' &&
+        sleep 30 &&
+        php /app/artisan p:user:make --email=${ADMIN_EMAIL} --username=${ADMIN_USERNAME} --name-first=${ADMIN_FIRST} --name-last=${ADMIN_LAST} --password=${ADMIN_PASSWORD} --admin=1 &&
+        echo 'Admin user created!' || echo 'User creation skipped (likely already exists).'
+    environment:
+      APP_KEY: ${APP_KEY}
       DB_CONNECTION: mysql
       DB_HOST: mysql
       DB_PORT: 3306
@@ -67,22 +128,16 @@ services:
       DB_USERNAME: pterodactyl
       DB_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_HOST: ptero-redis
-      REDIS_PORT: 6379
       CACHE_DRIVER: redis
       SESSION_DRIVER: redis
-      QUEUE_DRIVER: redis
-      MAIL_DRIVER: log
-      MAIL_FROM: "noreply@example.com"
+      QUEUE_CONNECTION: redis
     depends_on:
-      mysql:
-        condition: service_healthy
-      ptero-redis:
+      panel:
         condition: service_healthy
 
   # ── Pterodactyl Wings ──────────────────────────────────────────────────
-  # Wings uses host networking so it can manage game server containers
-  # and their port allocations directly on the host network.
-  # It won't be healthy until you paste the token from the Panel UI (step 6 below).
+  # Wings needs host networking to manage game server containers + port allocations.
+  # It won't fully work until you configure it via the Panel (see Step 3 below).
   wings:
     image: ghcr.io/pterodactyl/wings:v1.11.11
     restart: unless-stopped
@@ -94,28 +149,8 @@ services:
       - /etc/pterodactyl:/etc/pterodactyl
       - /tmp/pterodactyl:/tmp/pterodactyl
     depends_on:
-      - panel
-    
-    # Add this service to your MLPInfra docker-compose.yml
-    # This goes in the services: section
-
-  mlpmanager:
-    build:
-      context: ./MLPManager
-      dockerfile: Dockerfile
-    container_name: mlpmanager
-    restart: unless-stopped
-    ports:
-      - "8081:8081"
-    volumes:
-      - /etc/pterodactyl:/etc/pterodactyl:rw
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - JAVA_OPTS=-Xmx2G
-    depends_on:
-      - panel
-    networks:
-      - ptero-internal
+      panel:
+        condition: service_healthy   # Now actually waits for panel to be ready
 
 networks:
   ptero-internal:
