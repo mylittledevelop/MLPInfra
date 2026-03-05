@@ -143,19 +143,12 @@ services:
     networks:
       - ptero-internal
     ports:
-      - "8080:8080"
+      - "8083:8083"  # Changed from 8080:8080 to match application.yml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/pterodactyl:/var/lib/pterodactyl
       - /etc/pterodactyl:/etc/pterodactyl
-    environment:
-      PTERODACTYL_PANEL_URL: "http://panel:80"
-      PTERODACTYL_API_KEY: ${PTERODACTYL_API_KEY}
-      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/panel"
-      SPRING_DATASOURCE_USERNAME: pterodactyl
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
-      SPRING_REDIS_HOST: ptero-redis
-      SPRING_REDIS_PORT: 6379
+      - ./MLPManager/config.yml:/app/config.yml:ro  # Mount config file into container
     depends_on:
       panel:
         condition: service_healthy
