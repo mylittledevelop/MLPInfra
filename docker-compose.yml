@@ -15,7 +15,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     healthcheck:
       # Must pass root credentials or healthcheck silently fails on auth
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}" ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -30,7 +30,7 @@ services:
     volumes:
       - ptero-redis-data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -58,6 +58,7 @@ services:
       - panel-nginx:/etc/nginx/http.d
       - panel-logs:/app/storage/logs
     environment:
+      # !! Port MUST be included — omitting it breaks CSRF tokens and session cookies
       APP_URL: "http://${SERVER_IP}:8082"
       APP_ENV: production
       APP_KEY: ${APP_KEY}
@@ -79,8 +80,10 @@ services:
       # Drivers — these keys changed in Laravel 9+, old keys are silently ignored!
       CACHE_DRIVER: redis
       SESSION_DRIVER: redis
-      QUEUE_CONNECTION: redis
-      MAIL_MAILER: log
+      QUEUE_CONNECTION: redis      # ← was QUEUE_DRIVER (broken on Laravel 9+)
+
+      # Mail — MAIL_DRIVER is deprecated, use MAIL_MAILER
+      MAIL_MAILER: log             # ← was MAIL_DRIVER (broken on newer panel versions)
       MAIL_FROM_ADDRESS: "noreply@example.com"
       MAIL_FROM_NAME: "Pterodactyl"
 
@@ -93,12 +96,11 @@ services:
       ptero-redis:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "curl -sf http://localhost/auth/login || exit 1" ]
+      test: ["CMD-SHELL", "curl -sf http://localhost/auth/login || exit 1"]
       start_period: 30s
       interval: 5s
       timeout: 5s
       retries: 6
-
   # ── One-shot: Create admin user on first run ───────────────────────────
   # This runs once, creates your admin account, then exits.
   # It will error harmlessly on subsequent runs (duplicate email) — that's fine.
@@ -149,30 +151,6 @@ services:
     depends_on:
       panel:
         condition: service_healthy
-
-  # ── MLPManager ────────────────────────────────────────────────────────
-  mlpmanager:
-    build:
-      context: ../MLPManager    # sibling repo cloned alongside MLPInfra
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    networks:
-      - ptero-internal
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./config.yml:/app/config.yml:ro          # your config lives in MLPInfra/
-      - /var/run/docker.sock:/var/run/docker.sock # needed for Wings container restarts
-    environment:
-      PANEL_URL: "http://panel:80"               # internal — talks directly to panel container
-      PANEL_API_KEY: ${PANEL_API_KEY}            # Application API key from Admin → Application API
-      SERVER_IP: ${SERVER_IP}
-      TIMEZONE: ${TIMEZONE:-UTC}
-    depends_on:
-      panel:
-        condition: service_healthy
-      panel-setup:
-        condition: service_completed_successfully  # wait for admin user to exist first
 
 networks:
   ptero-internal:
