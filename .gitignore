@@ -10,9 +10,6 @@ build/
 *.ipr
 out/
 
-# Local
-.env
-
 # OS
 .DS_Store
 Thumbs.db
