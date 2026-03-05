@@ -80,13 +80,11 @@ services:
       # Drivers — these keys changed in Laravel 9+, old keys are silently ignored!
       CACHE_DRIVER: redis
       SESSION_DRIVER: redis
-      QUEUE_CONNECTION: redis      # ← was QUEUE_DRIVER (broken on Laravel 9+)
-
-      # Mail — MAIL_DRIVER is deprecated, use MAIL_MAILER
-      MAIL_MAILER: log             # ← was MAIL_DRIVER (broken on newer panel versions)
+      QUEUE_CONNECTION: redis
+      MAIL_MAILER: log
       MAIL_FROM_ADDRESS: "noreply@example.com"
       MAIL_FROM_NAME: "Pterodactyl"
-
+      
       # Critical for HTTP (non-HTTPS) setups — without this login will redirect-loop
       SESSION_SECURE_COOKIE: "false"
       TRUSTED_PROXIES: "*"
@@ -101,6 +99,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 6
+
   # ── One-shot: Create admin user on first run ───────────────────────────
   # This runs once, creates your admin account, then exits.
   # It will error harmlessly on subsequent runs (duplicate email) — that's fine.
@@ -133,6 +132,34 @@ services:
       QUEUE_CONNECTION: redis
     depends_on:
       panel:
+        condition: service_healthy
+
+  # ── MLPManager (Pterodactyl Manager) ───────────────────────────────────
+  mlp-manager:
+    build:
+      context: ./MLPManager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - ptero-internal
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/pterodactyl:/var/lib/pterodactyl
+      - /etc/pterodactyl:/etc/pterodactyl
+    environment:
+      PTERODACTYL_PANEL_URL: "http://panel:80"
+      PTERODACTYL_API_KEY: ${PTERODACTYL_API_KEY}
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/panel"
+      SPRING_DATASOURCE_USERNAME: pterodactyl
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_REDIS_HOST: ptero-redis
+      SPRING_REDIS_PORT: 6379
+    depends_on:
+      panel:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
 
   # ── Pterodactyl Wings ──────────────────────────────────────────────────
