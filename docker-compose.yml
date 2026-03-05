@@ -14,7 +14,7 @@ services:
       MYSQL_USER: pterodactyl
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,7 +28,7 @@ services:
     volumes:
       - ptero-redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -95,6 +95,27 @@ services:
       - /tmp/pterodactyl:/tmp/pterodactyl
     depends_on:
       - panel
+    
+    # Add this service to your MLPInfra docker-compose.yml
+    # This goes in the services: section
+
+  mlpmanager:
+    build:
+      context: ./MLPManager
+      dockerfile: Dockerfile
+    container_name: mlpmanager
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - /etc/pterodactyl:/etc/pterodactyl:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - JAVA_OPTS=-Xmx2G
+    depends_on:
+      - panel
+    networks:
+      - ptero-internal
 
 networks:
   ptero-internal:
